@@ -1,3 +1,4 @@
+import { CONTENT_LABELS } from "@/lib/mercan/labels"
 import { ContentType } from "@/types"
 import { FC } from "react"
 import { TabsTrigger } from "../ui/tabs"
@@ -16,9 +17,7 @@ export const SidebarSwitchItem: FC<SidebarSwitchItemProps> = ({
 }) => {
   return (
     <WithTooltip
-      display={
-        <div>{contentType[0].toUpperCase() + contentType.substring(1)}</div>
-      }
+      display={<div>{CONTENT_LABELS[contentType].plural}</div>}
       trigger={
         <TabsTrigger
           className="hover:opacity-50"

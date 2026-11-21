@@ -3,19 +3,16 @@ import { GlobalState } from "@/components/utility/global-state"
 import { Providers } from "@/components/utility/providers"
 import TranslationsProvider from "@/components/utility/translations-provider"
 import initTranslations from "@/lib/i18n"
-import { Database } from "@/supabase/types"
-import { createServerClient } from "@supabase/ssr"
 import { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
-import { cookies } from "next/headers"
 import { ReactNode } from "react"
 import "./globals.css"
 
-const inter = Inter({ subsets: ["latin"] })
-const APP_NAME = "Chatbot UI"
-const APP_DEFAULT_TITLE = "Chatbot UI"
-const APP_TITLE_TEMPLATE = "%s - Chatbot UI"
-const APP_DESCRIPTION = "Chabot UI PWA!"
+const inter = Inter({ subsets: ["latin", "latin-ext"] })
+const APP_NAME = "Mercan"
+const APP_DEFAULT_TITLE = "Mercan"
+const APP_TITLE_TEMPLATE = "%s - Mercan"
+const APP_DESCRIPTION = "Mercan: Türkçe yapay zekâ asistanı"
 
 interface RootLayoutProps {
   children: ReactNode
@@ -32,11 +29,17 @@ export const metadata: Metadata = {
   },
   description: APP_DESCRIPTION,
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" }
+    ],
+    apple: "/apple-touch-icon.png"
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black",
     title: APP_DEFAULT_TITLE
-    // startUpImage: [],
   },
   formatDetection: {
     telephone: false
@@ -61,7 +64,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: "#000000"
+  themeColor: "#ffffff"
 }
 
 const i18nNamespaces = ["translation"]
@@ -70,26 +73,12 @@ export default async function RootLayout({
   children,
   params: { locale }
 }: RootLayoutProps) {
-  const cookieStore = cookies()
-  const supabase = createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        }
-      }
-    }
-  )
-  const session = (await supabase.auth.getSession()).data.session
-
-  const { t, resources } = await initTranslations(locale, i18nNamespaces)
+  const { resources } = await initTranslations(locale, i18nNamespaces)
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="tr" suppressHydrationWarning>
       <body className={inter.className}>
-        <Providers attribute="class" defaultTheme="dark">
+        <Providers attribute="class" defaultTheme="light" enableSystem={false}>
           <TranslationsProvider
             namespaces={i18nNamespaces}
             locale={locale}
@@ -97,7 +86,7 @@ export default async function RootLayout({
           >
             <Toaster richColors position="top-center" duration={3000} />
             <div className="bg-background text-foreground flex h-dvh flex-col items-center overflow-x-auto">
-              {session ? <GlobalState>{children}</GlobalState> : children}
+              <GlobalState>{children}</GlobalState>
             </div>
           </TranslationsProvider>
         </Providers>

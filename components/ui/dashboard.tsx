@@ -9,68 +9,50 @@ import { cn } from "@/lib/utils"
 import { ContentType } from "@/types"
 import { IconChevronCompactRight } from "@tabler/icons-react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { FC, useState } from "react"
-import { useSelectFileHandler } from "../chat/chat-hooks/use-select-file-handler"
-import { CommandK } from "../utility/command-k"
+import { FC, useEffect, useState } from "react"
 
 export const SIDEBAR_WIDTH = 350
+
+const VALID_TABS: ContentType[] = ["chats"]
 
 interface DashboardProps {
   children: React.ReactNode
 }
 
 export const Dashboard: FC<DashboardProps> = ({ children }) => {
-  useHotkey("s", () => setShowSidebar(prevState => !prevState))
+  useHotkey("s", () => handleToggleSidebar())
 
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const tabValue = searchParams.get("tab") || "chats"
+  const tabParam = searchParams.get("tab") as ContentType | null
+  const tabValue = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "chats"
 
-  const { handleSelectDeviceFile } = useSelectFileHandler()
+  const [contentType, setContentType] = useState<ContentType>(tabValue)
+  const [showSidebar, setShowSidebar] = useState(true)
 
-  const [contentType, setContentType] = useState<ContentType>(
-    tabValue as ContentType
-  )
-  const [showSidebar, setShowSidebar] = useState(
-    localStorage.getItem("showSidebar") === "true"
-  )
-  const [isDragging, setIsDragging] = useState(false)
-
-  const onFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-
-    const files = event.dataTransfer.files
-    const file = files[0]
-
-    handleSelectDeviceFile(file)
-
-    setIsDragging(false)
-  }
-
-  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    setIsDragging(false)
-  }
-
-  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-  }
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("showSidebar")
+      if (stored !== null) setShowSidebar(stored === "true")
+    } catch {
+      // localStorage yoksa kenar çubuğu açık başlar.
+    }
+  }, [])
 
   const handleToggleSidebar = () => {
-    setShowSidebar(prevState => !prevState)
-    localStorage.setItem("showSidebar", String(!showSidebar))
+    setShowSidebar(prevState => {
+      try {
+        localStorage.setItem("showSidebar", String(!prevState))
+      } catch {
+        // yoksay
+      }
+      return !prevState
+    })
   }
 
   return (
     <div className="flex size-full">
-      <CommandK />
-
       <div
         className={cn(
           "duration-200 dark:border-none " + (showSidebar ? "border-r-2" : "")
@@ -98,31 +80,19 @@ export const Dashboard: FC<DashboardProps> = ({ children }) => {
         )}
       </div>
 
-      <div
-        className="bg-muted/50 relative flex w-screen min-w-[90%] grow flex-col sm:min-w-fit"
-        onDrop={onFileDrop}
-        onDragOver={onDragOver}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-      >
-        {isDragging ? (
-          <div className="flex h-full items-center justify-center bg-black/50 text-2xl text-white">
-            drop file here
-          </div>
-        ) : (
-          children
-        )}
+      <div className="bg-muted/50 relative flex w-screen min-w-[90%] grow flex-col sm:min-w-0">
+        {children}
 
         <Button
           className={cn(
             "absolute left-[4px] top-[50%] z-10 size-[32px] cursor-pointer"
           )}
           style={{
-            // marginLeft: showSidebar ? `${SIDEBAR_WIDTH}px` : "0px",
             transform: showSidebar ? "rotate(180deg)" : "rotate(0deg)"
           }}
           variant="ghost"
           size="icon"
+          title={showSidebar ? "Kenar çubuğunu gizle" : "Kenar çubuğunu göster"}
           onClick={handleToggleSidebar}
         >
           <IconChevronCompactRight size={24} />

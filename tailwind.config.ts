@@ -16,6 +16,10 @@ module.exports = {
       }
     },
     extend: {
+      fontFamily: {
+        // Mercan logosundaki yazı tipi (brand/mercan-02.svg)
+        brand: ['"Bookman Old Style"', '"URW Bookman"', 'Bookman', 'Georgia', 'serif']
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

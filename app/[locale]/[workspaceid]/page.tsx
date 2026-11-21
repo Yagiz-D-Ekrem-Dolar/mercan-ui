@@ -1,14 +1,16 @@
 "use client"
 
-import { ChatbotUIContext } from "@/context/context"
-import { useContext } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { useEffect } from "react"
+import Loading from "../loading"
 
 export default function WorkspacePage() {
-  const { selectedWorkspace } = useContext(ChatbotUIContext)
+  const router = useRouter()
+  const params = useParams()
 
-  return (
-    <div className="flex h-screen w-full flex-col items-center justify-center">
-      <div className="text-4xl">{selectedWorkspace?.name}</div>
-    </div>
-  )
+  useEffect(() => {
+    router.replace(`/${params.workspaceid}/chat`)
+  }, [router, params.workspaceid])
+
+  return <Loading />
 }

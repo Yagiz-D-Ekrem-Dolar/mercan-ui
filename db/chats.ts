@@ -1,81 +1,39 @@
-import { supabase } from "@/lib/supabase/browser-client"
-import { TablesInsert, TablesUpdate } from "@/supabase/types"
+import { localDb } from "@/lib/local-db"
+import { Tables, TablesInsert, TablesUpdate } from "@/types/database"
 
 export const getChatById = async (chatId: string) => {
-  const { data: chat } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("id", chatId)
-    .maybeSingle()
-
-  return chat
+  return localDb.get<Tables<"chats">>("chats", chatId)
 }
 
 export const getChatsByWorkspaceId = async (workspaceId: string) => {
-  const { data: chats, error } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false })
-
-  if (!chats) {
-    throw new Error(error.message)
-  }
-
-  return chats
+  return localDb
+    .filter<Tables<"chats">>("chats", chat => chat.workspace_id === workspaceId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
 export const createChat = async (chat: TablesInsert<"chats">) => {
-  const { data: createdChat, error } = await supabase
-    .from("chats")
-    .insert([chat])
-    .select("*")
-    .single()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return createdChat
+  return localDb.insert<Tables<"chats">>("chats", {
+    assistant_id: null,
+    folder_id: null,
+    sharing: "private",
+    hyperparameters: null,
+    ...chat
+  })
 }
 
 export const createChats = async (chats: TablesInsert<"chats">[]) => {
-  const { data: createdChats, error } = await supabase
-    .from("chats")
-    .insert(chats)
-    .select("*")
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return createdChats
+  return Promise.all(chats.map(chat => createChat(chat)))
 }
 
 export const updateChat = async (
   chatId: string,
   chat: TablesUpdate<"chats">
 ) => {
-  const { data: updatedChat, error } = await supabase
-    .from("chats")
-    .update(chat)
-    .eq("id", chatId)
-    .select("*")
-    .single()
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  return updatedChat
+  return localDb.update<Tables<"chats">>("chats", chatId, chat)
 }
 
 export const deleteChat = async (chatId: string) => {
-  const { error } = await supabase.from("chats").delete().eq("id", chatId)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
+  localDb.removeWhere("messages", message => message.chat_id === chatId)
+  localDb.remove("chats", chatId)
   return true
 }

@@ -1,31 +1,62 @@
 import { ChatbotUIContext } from "@/context/context"
 import useHotkey from "@/lib/hooks/use-hotkey"
-import { LLM_LIST } from "@/lib/models/llm/llm-list"
 import { cn } from "@/lib/utils"
 import {
-  IconBolt,
-  IconCirclePlus,
+  IconBulb,
   IconPlayerStopFilled,
-  IconSend
+  IconSend,
+  IconWorld
 } from "@tabler/icons-react"
-import Image from "next/image"
-import { FC, useContext, useEffect, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
-import { Input } from "../ui/input"
+import { FC, ReactNode, useContext, useEffect, useState } from "react"
 import { TextareaAutosize } from "../ui/textarea-autosize"
-import { ChatCommandInput } from "./chat-command-input"
-import { ChatFilesDisplay } from "./chat-files-display"
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { useChatHandler } from "./chat-hooks/use-chat-handler"
 import { useChatHistoryHandler } from "./chat-hooks/use-chat-history"
-import { usePromptAndCommand } from "./chat-hooks/use-prompt-and-command"
-import { useSelectFileHandler } from "./chat-hooks/use-select-file-handler"
+
+interface ComposerToggleProps {
+  active: boolean
+  icon: ReactNode
+  label: string
+  tooltip: string
+  onToggle: () => void
+}
+
+const ComposerToggle: FC<ComposerToggleProps> = ({
+  active,
+  icon,
+  label,
+  tooltip,
+  onToggle
+}) => {
+  return (
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-pressed={active}
+          onClick={onToggle}
+          className={cn(
+            "focus-visible:ring-ring flex h-8 select-none items-center space-x-1.5 rounded-full border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2",
+            active
+              ? "border-primary bg-accent text-foreground"
+              : "border-input text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
+        >
+          {icon}
+          <span>{label}</span>
+        </button>
+      </TooltipTrigger>
+
+      <TooltipContent side="top" className="max-w-[260px] text-sm">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 interface ChatInputProps {}
 
 export const ChatInput: FC<ChatInputProps> = ({}) => {
-  const { t } = useTranslation()
-
   useHotkey("l", () => {
     handleFocusChatInput()
   })
@@ -33,28 +64,14 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
   const [isTyping, setIsTyping] = useState<boolean>(false)
 
   const {
-    isAssistantPickerOpen,
-    focusAssistant,
-    setFocusAssistant,
     userInput,
+    setUserInput,
     chatMessages,
     isGenerating,
-    selectedPreset,
-    selectedAssistant,
-    focusPrompt,
-    setFocusPrompt,
-    focusFile,
-    focusTool,
-    setFocusTool,
-    isToolPickerOpen,
-    isPromptPickerOpen,
-    setIsPromptPickerOpen,
-    isFilePickerOpen,
-    setFocusFile,
-    chatSettings,
-    selectedTools,
-    setSelectedTools,
-    assistantImages
+    reasoningEnabled,
+    setReasoningEnabled,
+    webSearchEnabled,
+    setWebSearchEnabled
   } = useContext(ChatbotUIContext)
 
   const {
@@ -64,51 +81,32 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
     handleFocusChatInput
   } = useChatHandler()
 
-  const { handleInputChange } = usePromptAndCommand()
-
-  const { filesToAccept, handleSelectDeviceFile } = useSelectFileHandler()
-
   const {
     setNewMessageContentToNextUserMessage,
     setNewMessageContentToPreviousUserMessage
   } = useChatHistoryHandler()
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
   useEffect(() => {
     setTimeout(() => {
       handleFocusChatInput()
     }, 200) // FIX: hacky
-  }, [selectedPreset, selectedAssistant])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const canSend = userInput.trim().length > 0 && !isGenerating
+
+  const send = () => {
+    if (!canSend) return
+    handleSendMessage(userInput, chatMessages, false)
+  }
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (!isTyping && event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      setIsPromptPickerOpen(false)
-      handleSendMessage(userInput, chatMessages, false)
+      send()
     }
 
-    // Consolidate conditions to avoid TypeScript error
-    if (
-      isPromptPickerOpen ||
-      isFilePickerOpen ||
-      isToolPickerOpen ||
-      isAssistantPickerOpen
-    ) {
-      if (
-        event.key === "Tab" ||
-        event.key === "ArrowUp" ||
-        event.key === "ArrowDown"
-      ) {
-        event.preventDefault()
-        // Toggle focus based on picker type
-        if (isPromptPickerOpen) setFocusPrompt(!focusPrompt)
-        if (isFilePickerOpen) setFocusFile(!focusFile)
-        if (isToolPickerOpen) setFocusTool(!focusTool)
-        if (isAssistantPickerOpen) setFocusAssistant(!focusAssistant)
-      }
-    }
-
+    // Ctrl/⌘ + Shift + ↑/↓ ile önceki mesajlar arasında gezin
     if (event.key === "ArrowUp" && event.shiftKey && event.ctrlKey) {
       event.preventDefault()
       setNewMessageContentToPreviousUserMessage()
@@ -117,165 +115,77 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
     if (event.key === "ArrowDown" && event.shiftKey && event.ctrlKey) {
       event.preventDefault()
       setNewMessageContentToNextUserMessage()
-    }
-
-    //use shift+ctrl+up and shift+ctrl+down to navigate through chat history
-    if (event.key === "ArrowUp" && event.shiftKey && event.ctrlKey) {
-      event.preventDefault()
-      setNewMessageContentToPreviousUserMessage()
-    }
-
-    if (event.key === "ArrowDown" && event.shiftKey && event.ctrlKey) {
-      event.preventDefault()
-      setNewMessageContentToNextUserMessage()
-    }
-
-    if (
-      isAssistantPickerOpen &&
-      (event.key === "Tab" ||
-        event.key === "ArrowUp" ||
-        event.key === "ArrowDown")
-    ) {
-      event.preventDefault()
-      setFocusAssistant(!focusAssistant)
-    }
-  }
-
-  const handlePaste = (event: React.ClipboardEvent) => {
-    const imagesAllowed = LLM_LIST.find(
-      llm => llm.modelId === chatSettings?.model
-    )?.imageInput
-
-    const items = event.clipboardData.items
-    for (const item of items) {
-      if (item.type.indexOf("image") === 0) {
-        if (!imagesAllowed) {
-          toast.error(
-            `Images are not supported for this model. Use models like GPT-4 Vision instead.`
-          )
-          return
-        }
-        const file = item.getAsFile()
-        if (!file) return
-        handleSelectDeviceFile(file)
-      }
     }
   }
 
   return (
-    <>
-      <div className="flex flex-col flex-wrap justify-center gap-2">
-        <ChatFilesDisplay />
+    <div className="border-input relative mt-3 flex w-full flex-col rounded-xl border-2">
+      <TextareaAutosize
+        textareaRef={chatInputRef}
+        className="ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring text-md flex w-full resize-none rounded-md border-none bg-transparent px-4 pb-1 pt-3 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        placeholder="Mercan'a bir şey sorun..."
+        onValueChange={setUserInput}
+        value={userInput}
+        minRows={1}
+        maxRows={18}
+        onKeyDown={handleKeyDown}
+        onCompositionStart={() => setIsTyping(true)}
+        onCompositionEnd={() => setIsTyping(false)}
+      />
 
-        {selectedTools &&
-          selectedTools.map((tool, index) => (
-            <div
-              key={index}
-              className="flex justify-center"
-              onClick={() =>
-                setSelectedTools(
-                  selectedTools.filter(
-                    selectedTool => selectedTool.id !== tool.id
-                  )
-                )
-              }
-            >
-              <div className="flex cursor-pointer items-center justify-center space-x-1 rounded-lg bg-purple-600 px-3 py-1 hover:opacity-50">
-                <IconBolt size={20} />
+      <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <ComposerToggle
+            active={reasoningEnabled}
+            icon={<IconBulb size={18} />}
+            label="Akıl yürütme"
+            tooltip="Mercan yanıt vermeden önce adım adım düşünür. Düşünce süreci yanıtın üstünde açılır kutuda gösterilir; yanıt biraz daha geç gelir."
+            onToggle={() => setReasoningEnabled(prev => !prev)}
+          />
 
-                <div>{tool.name}</div>
-              </div>
-            </div>
-          ))}
+          <ComposerToggle
+            active={webSearchEnabled}
+            icon={<IconWorld size={18} />}
+            label="Web araması"
+            tooltip="Yanıt vermeden önce web'de arama yapar, bulunan sonuçları modele verir ve kaynakları yanıtın altında listeler."
+            onToggle={() => setWebSearchEnabled(prev => !prev)}
+          />
+        </div>
 
-        {selectedAssistant && (
-          <div className="border-primary mx-auto flex w-fit items-center space-x-2 rounded-lg border p-1.5">
-            {selectedAssistant.image_path && (
-              <Image
-                className="rounded"
-                src={
-                  assistantImages.find(
-                    img => img.path === selectedAssistant.image_path
-                  )?.base64
-                }
-                width={28}
-                height={28}
-                alt={selectedAssistant.name}
-              />
-            )}
-
-            <div className="text-sm font-bold">
-              Talking to {selectedAssistant.name}
-            </div>
-          </div>
+        {isGenerating ? (
+          <Tooltip delayDuration={400}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="Durdur"
+                onClick={handleStopMessage}
+                className="hover:bg-accent shrink-0 rounded p-1 hover:opacity-50"
+              >
+                <IconPlayerStopFilled className="animate-pulse" size={24} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Durdur</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Tooltip delayDuration={400}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="Gönder"
+                onClick={send}
+                disabled={!canSend}
+                className={cn(
+                  "bg-primary text-secondary shrink-0 rounded p-1 transition-opacity hover:opacity-50",
+                  !canSend && "cursor-not-allowed opacity-50 hover:opacity-50"
+                )}
+              >
+                <IconSend size={22} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Gönder (Enter)</TooltipContent>
+          </Tooltip>
         )}
       </div>
-
-      <div className="border-input relative mt-3 flex min-h-[60px] w-full items-center justify-center rounded-xl border-2">
-        <div className="absolute bottom-[76px] left-0 max-h-[300px] w-full overflow-auto rounded-xl dark:border-none">
-          <ChatCommandInput />
-        </div>
-
-        <>
-          <IconCirclePlus
-            className="absolute bottom-[12px] left-3 cursor-pointer p-1 hover:opacity-50"
-            size={32}
-            onClick={() => fileInputRef.current?.click()}
-          />
-
-          {/* Hidden input to select files from device */}
-          <Input
-            ref={fileInputRef}
-            className="hidden"
-            type="file"
-            onChange={e => {
-              if (!e.target.files) return
-              handleSelectDeviceFile(e.target.files[0])
-            }}
-            accept={filesToAccept}
-          />
-        </>
-
-        <TextareaAutosize
-          textareaRef={chatInputRef}
-          className="ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring text-md flex w-full resize-none rounded-md border-none bg-transparent px-14 py-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          placeholder={t(
-            // `Ask anything. Type "@" for assistants, "/" for prompts, "#" for files, and "!" for tools.`
-            `Ask anything. Type @  /  #  !`
-          )}
-          onValueChange={handleInputChange}
-          value={userInput}
-          minRows={1}
-          maxRows={18}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onCompositionStart={() => setIsTyping(true)}
-          onCompositionEnd={() => setIsTyping(false)}
-        />
-
-        <div className="absolute bottom-[14px] right-3 cursor-pointer hover:opacity-50">
-          {isGenerating ? (
-            <IconPlayerStopFilled
-              className="hover:bg-background animate-pulse rounded bg-transparent p-1"
-              onClick={handleStopMessage}
-              size={30}
-            />
-          ) : (
-            <IconSend
-              className={cn(
-                "bg-primary text-secondary rounded p-1",
-                !userInput && "cursor-not-allowed opacity-50"
-              )}
-              onClick={() => {
-                if (!userInput) return
-
-                handleSendMessage(userInput, chatMessages, false)
-              }}
-              size={30}
-            />
-          )}
-        </div>
-      </div>
-    </>
+    </div>
   )
 }

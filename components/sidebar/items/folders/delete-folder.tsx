@@ -9,9 +9,8 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog"
 import { ChatbotUIContext } from "@/context/context"
-import { deleteFolder } from "@/db/folders"
-import { supabase } from "@/lib/supabase/browser-client"
-import { Tables } from "@/supabase/types"
+import { deleteFolder, deleteFolderItems } from "@/db/folders"
+import { Tables } from "@/types/database"
 import { ContentType } from "@/types"
 import { IconTrash } from "@tabler/icons-react"
 import { FC, useContext, useRef, useState } from "react"
@@ -26,32 +25,11 @@ export const DeleteFolder: FC<DeleteFolderProps> = ({
   folder,
   contentType
 }) => {
-  const {
-    setChats,
-    setFolders,
-    setPresets,
-    setPrompts,
-    setFiles,
-    setCollections,
-    setAssistants,
-    setTools,
-    setModels
-  } = useContext(ChatbotUIContext)
+  const { setChats, setFolders } = useContext(ChatbotUIContext)
 
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   const [showFolderDialog, setShowFolderDialog] = useState(false)
-
-  const stateUpdateFunctions = {
-    chats: setChats,
-    presets: setPresets,
-    prompts: setPrompts,
-    files: setFiles,
-    collections: setCollections,
-    assistants: setAssistants,
-    tools: setTools,
-    models: setModels
-  }
 
   const handleDeleteFolderOnly = async () => {
     await deleteFolder(folder.id)
@@ -60,40 +38,23 @@ export const DeleteFolder: FC<DeleteFolderProps> = ({
 
     setShowFolderDialog(false)
 
-    const setStateFunction = stateUpdateFunctions[contentType]
-
-    if (!setStateFunction) return
-
-    setStateFunction((prevItems: any) =>
-      prevItems.map((item: any) => {
-        if (item.folder_id === folder.id) {
-          return {
-            ...item,
-            folder_id: null
-          }
-        }
-
-        return item
-      })
+    setChats(prevItems =>
+      prevItems.map(item =>
+        item.folder_id === folder.id ? { ...item, folder_id: null } : item
+      )
     )
   }
 
   const handleDeleteFolderAndItems = async () => {
-    const setStateFunction = stateUpdateFunctions[contentType]
-
-    if (!setStateFunction) return
-
-    const { error } = await supabase
-      .from(contentType)
-      .delete()
-      .eq("folder_id", folder.id)
-
-    if (error) {
-      toast.error(error.message)
+    try {
+      await deleteFolderItems(contentType, folder.id)
+    } catch (error) {
+      toast.error(`Klasördeki sohbetler silinemedi. ${error}`)
+      return
     }
 
-    setStateFunction((prevItems: any) =>
-      prevItems.filter((item: any) => item.folder_id !== folder.id)
+    setChats(prevItems =>
+      prevItems.filter(item => item.folder_id !== folder.id)
     )
 
     handleDeleteFolderOnly()
@@ -107,16 +68,16 @@ export const DeleteFolder: FC<DeleteFolderProps> = ({
 
       <DialogContent className="min-w-[550px]">
         <DialogHeader>
-          <DialogTitle>Delete {folder.name}</DialogTitle>
+          <DialogTitle>Klasörü sil: {folder.name}</DialogTitle>
 
           <DialogDescription>
-            Are you sure you want to delete this folder?
+            Bu klasörü silmek istediğinize emin misiniz?
           </DialogDescription>
         </DialogHeader>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => setShowFolderDialog(false)}>
-            Cancel
+            Vazgeç
           </Button>
 
           <Button
@@ -124,15 +85,11 @@ export const DeleteFolder: FC<DeleteFolderProps> = ({
             variant="destructive"
             onClick={handleDeleteFolderAndItems}
           >
-            Delete Folder & Included Items
+            Klasörü ve Sohbetleri Sil
           </Button>
 
-          <Button
-            ref={buttonRef}
-            variant="destructive"
-            onClick={handleDeleteFolderOnly}
-          >
-            Delete Folder Only
+          <Button variant="destructive" onClick={handleDeleteFolderOnly}>
+            Yalnızca Klasörü Sil
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,3 +1,4 @@
+import { CONTENT_LABELS } from "@/lib/mercan/labels"
 import { ContentType } from "@/types"
 import { FC } from "react"
 import { Input } from "../ui/input"
@@ -15,7 +16,7 @@ export const SidebarSearch: FC<SidebarSearchProps> = ({
 }) => {
   return (
     <Input
-      placeholder={`Search ${contentType}...`}
+      placeholder={CONTENT_LABELS[contentType].searchPlaceholder}
       value={searchTerm}
       onChange={e => setSearchTerm(e.target.value)}
     />

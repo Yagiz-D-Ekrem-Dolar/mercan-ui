@@ -51,7 +51,7 @@ export const MessageActions: FC<MessageActionsProps> = ({
         <WithTooltip
           delayDuration={1000}
           side="bottom"
-          display={<div>Fork Chat</div>}
+          display={<div>Sohbeti çatalla</div>}
           trigger={
             <IconGitFork
               className="cursor-pointer hover:opacity-50"
@@ -66,7 +66,7 @@ export const MessageActions: FC<MessageActionsProps> = ({
         <WithTooltip
           delayDuration={1000}
           side="bottom"
-          display={<div>Edit</div>}
+          display={<div>Düzenle</div>}
           trigger={
             <IconEdit
               className="cursor-pointer hover:opacity-50"
@@ -81,7 +81,7 @@ export const MessageActions: FC<MessageActionsProps> = ({
         <WithTooltip
           delayDuration={1000}
           side="bottom"
-          display={<div>Copy</div>}
+          display={<div>Kopyala</div>}
           trigger={
             showCheckmark ? (
               <IconCheck size={MESSAGE_ICON_SIZE} />
@@ -100,7 +100,7 @@ export const MessageActions: FC<MessageActionsProps> = ({
         <WithTooltip
           delayDuration={1000}
           side="bottom"
-          display={<div>Regenerate</div>}
+          display={<div>Yeniden oluştur</div>}
           trigger={
             <IconRepeat
               className="cursor-pointer hover:opacity-50"

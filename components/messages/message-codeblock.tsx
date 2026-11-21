@@ -62,7 +62,7 @@ export const MessageCodeBlock: FC<MessageCodeBlockProps> = memo(
         3,
         true
       )}${fileExtension}`
-      const fileName = window.prompt("Enter file name" || "", suggestedFileName)
+      const fileName = window.prompt("Dosya adını girin", suggestedFileName)
 
       if (!fileName) {
         return

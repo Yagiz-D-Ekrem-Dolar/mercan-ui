@@ -17,6 +17,9 @@ export const MessageMarkdown: FC<MessageMarkdownProps> = ({ content }) => {
         p({ children }) {
           return <p className="mb-2 last:mb-0">{children}</p>
         },
+        a({ node, ...props }) {
+          return <a target="_blank" rel="noopener noreferrer" {...props} />
+        },
         img({ node, ...props }) {
           return <img className="max-w-[67%]" {...props} />
         },

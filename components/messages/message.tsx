@@ -1,34 +1,39 @@
 import { useChatHandler } from "@/components/chat/chat-hooks/use-chat-handler"
 import { ChatbotUIContext } from "@/context/context"
+import { splitReasoning } from "@/lib/build-prompt"
+import { useTypewriter } from "@/lib/hooks/use-typewriter"
+import { formatSettingValue } from "@/lib/mercan/hyperparameters"
 import { LLM_LIST } from "@/lib/models/llm/llm-list"
 import { cn } from "@/lib/utils"
-import { Tables } from "@/supabase/types"
-import { LLM, LLMID, MessageImage, ModelProvider } from "@/types"
+import { Tables } from "@/types/database"
+import { MessageMetadata } from "@/types"
 import {
-  IconBolt,
-  IconCaretDownFilled,
-  IconCaretRightFilled,
+  IconBulb,
   IconCircleFilled,
-  IconFileText,
-  IconMoodSmile,
-  IconPencil
+  IconPencil,
+  IconWorld
 } from "@tabler/icons-react"
-import Image from "next/image"
 import { FC, useContext, useEffect, useRef, useState } from "react"
 import { ModelIcon } from "../models/model-icon"
 import { Button } from "../ui/button"
-import { FileIcon } from "../ui/file-icon"
-import { FilePreview } from "../ui/file-preview"
 import { TextareaAutosize } from "../ui/textarea-autosize"
 import { WithTooltip } from "../ui/with-tooltip"
 import { MessageActions } from "./message-actions"
 import { MessageMarkdown } from "./message-markdown"
+import { MessageReasoning } from "./message-reasoning"
+import { MessageSources } from "./message-sources"
 
 const ICON_SIZE = 32
 
+// Yazım sırasında metnin sonuna yanıp sönen imleç ekler (MessageMarkdown
+// içinde `▍` satır içi kodu imleç olarak çizilir).
+const withCursor = (text: string) => {
+  const openFences = (text.match(/```/g) || []).length % 2 === 1
+  return openFences ? `${text}▍` : `${text}${text ? " " : ""}\`▍\``
+}
+
 interface MessageProps {
   message: Tables<"messages">
-  fileItems: Tables<"file_items">[]
   isEditing: boolean
   isLast: boolean
   onStartEdit: (message: Tables<"messages">) => void
@@ -38,7 +43,6 @@ interface MessageProps {
 
 export const Message: FC<MessageProps> = ({
   message,
-  fileItems,
   isEditing,
   isLast,
   onStartEdit,
@@ -46,20 +50,12 @@ export const Message: FC<MessageProps> = ({
   onSubmitEdit
 }) => {
   const {
-    assistants,
     profile,
     isGenerating,
     setIsGenerating,
     firstTokenReceived,
-    availableLocalModels,
-    availableOpenRouterModels,
     chatMessages,
-    selectedAssistant,
-    chatImages,
-    assistantImages,
-    toolInUse,
-    files,
-    models
+    toolInUse
   } = useContext(ChatbotUIContext)
 
   const { handleSendMessage } = useChatHandler()
@@ -69,21 +65,32 @@ export const Message: FC<MessageProps> = ({
   const [isHovering, setIsHovering] = useState(false)
   const [editedMessage, setEditedMessage] = useState(message.content)
 
-  const [showImagePreview, setShowImagePreview] = useState(false)
-  const [selectedImage, setSelectedImage] = useState<MessageImage | null>(null)
+  const isAssistant = message.role === "assistant"
+  const metadata = (message.metadata ?? {}) as MessageMetadata
+  const isStreaming = isGenerating && isLast && isAssistant
 
-  const [showFileItemPreview, setShowFileItemPreview] = useState(false)
-  const [selectedFileItem, setSelectedFileItem] =
-    useState<Tables<"file_items"> | null>(null)
+  // Daktilo efekti: yalnızca o an üretilen asistan yanıtında
+  const { displayedText, isTyping } = useTypewriter(
+    message.content,
+    isStreaming
+  )
+  const visibleContent = isAssistant ? displayedText : message.content
+  const showCursor = isAssistant && (isStreaming || isTyping)
 
-  const [viewSources, setViewSources] = useState(false)
+  const { reasoning, answer, isThinking } = isAssistant
+    ? splitReasoning(visibleContent)
+    : { reasoning: "", answer: message.content, isThinking: false }
 
   const handleCopy = () => {
+    const text = isAssistant
+      ? splitReasoning(message.content).answer
+      : message.content
+
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(message.content)
+      navigator.clipboard.writeText(text)
     } else {
       const textArea = document.createElement("textarea")
-      textArea.value = message.content
+      textArea.value = text
       document.body.appendChild(textArea)
       textArea.focus()
       textArea.select()
@@ -98,15 +105,24 @@ export const Message: FC<MessageProps> = ({
   }
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (isEditing && event.key === "Enter" && event.metaKey) {
+    if (
+      isEditing &&
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey)
+    ) {
       handleSendEdit()
     }
   }
 
   const handleRegenerate = async () => {
     setIsGenerating(true)
+
+    const lastUserMessage = [...chatMessages]
+      .reverse()
+      .find(chatMessage => chatMessage.message.role === "user")
+
     await handleSendMessage(
-      editedMessage || chatMessages[chatMessages.length - 2].message.content,
+      lastUserMessage?.message.content || "",
       chatMessages,
       true
     )
@@ -124,60 +140,35 @@ export const Message: FC<MessageProps> = ({
       input.focus()
       input.setSelectionRange(input.value.length, input.value.length)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing])
 
-  const MODEL_DATA = [
-    ...models.map(model => ({
-      modelId: model.model_id as LLMID,
-      modelName: model.name,
-      provider: "custom" as ModelProvider,
-      hostedId: model.id,
-      platformLink: "",
-      imageInput: false
-    })),
-    ...LLM_LIST,
-    ...availableLocalModels,
-    ...availableOpenRouterModels
-  ].find(llm => llm.modelId === message.model) as LLM
+  const modelData = LLM_LIST.find(llm => llm.modelId === message.model)
 
-  const messageAssistantImage = assistantImages.find(
-    image => image.assistantId === message.assistant_id
-  )?.base64
-
-  const selectedAssistantImage = assistantImages.find(
-    image => image.path === selectedAssistant?.image_path
-  )?.base64
-
-  const modelDetails = LLM_LIST.find(model => model.modelId === message.model)
-
-  const fileAccumulator: Record<
-    string,
-    {
-      id: string
-      name: string
-      count: number
-      type: string
-      description: string
+  const renderPending = () => {
+    if (toolInUse === "web") {
+      return (
+        <div className="flex animate-pulse items-center space-x-2">
+          <IconWorld size={20} />
+          <div>{"Web'de aranıyor…"}</div>
+        </div>
+      )
     }
-  > = {}
 
-  const fileSummary = fileItems.reduce((acc, fileItem) => {
-    const parentFile = files.find(file => file.id === fileItem.file_id)
-    if (parentFile) {
-      if (!acc[parentFile.id]) {
-        acc[parentFile.id] = {
-          id: parentFile.id,
-          name: parentFile.name,
-          count: 1,
-          type: parentFile.type,
-          description: parentFile.description
-        }
-      } else {
-        acc[parentFile.id].count += 1
-      }
+    if (metadata.reasoning) {
+      return (
+        <div className="flex animate-pulse items-center space-x-2">
+          <IconBulb size={20} />
+          <div>Düşünüyor…</div>
+        </div>
+      )
     }
-    return acc
-  }, fileAccumulator)
+
+    return <IconCircleFilled className="animate-pulse" size={20} />
+  }
+
+  const usage = metadata.usage
+  const isDone = !isStreaming && !isTyping
 
   return (
     <div
@@ -189,18 +180,19 @@ export const Message: FC<MessageProps> = ({
       onMouseLeave={() => setIsHovering(false)}
       onKeyDown={handleKeyDown}
     >
-      <div className="relative flex w-full flex-col p-6 sm:w-[550px] sm:px-0 md:w-[650px] lg:w-[650px] xl:w-[700px]">
+      <div className="relative flex w-full max-w-full flex-col p-6 sm:w-[550px] sm:px-0 md:w-[650px] lg:w-[650px] xl:w-[700px]">
         <div className="absolute right-5 top-7 sm:right-0">
           <MessageActions
             onCopy={handleCopy}
             onEdit={handleStartEdit}
-            isAssistant={message.role === "assistant"}
+            isAssistant={isAssistant}
             isLast={isLast}
             isEditing={isEditing}
             isHovering={isHovering}
             onRegenerate={handleRegenerate}
           />
         </div>
+
         <div className="space-y-3">
           {message.role === "system" ? (
             <div className="flex items-center space-x-4">
@@ -209,93 +201,46 @@ export const Message: FC<MessageProps> = ({
                 size={ICON_SIZE}
               />
 
-              <div className="text-lg font-semibold">Prompt</div>
+              <div className="text-lg font-semibold">Sistem İstemi</div>
             </div>
           ) : (
             <div className="flex items-center space-x-3">
-              {message.role === "assistant" ? (
-                messageAssistantImage ? (
-                  <Image
-                    style={{
-                      width: `${ICON_SIZE}px`,
-                      height: `${ICON_SIZE}px`
-                    }}
-                    className="rounded"
-                    src={messageAssistantImage}
-                    alt="assistant image"
-                    height={ICON_SIZE}
-                    width={ICON_SIZE}
-                  />
-                ) : (
-                  <WithTooltip
-                    display={<div>{MODEL_DATA?.modelName}</div>}
-                    trigger={
-                      <ModelIcon
-                        provider={modelDetails?.provider || "custom"}
-                        height={ICON_SIZE}
-                        width={ICON_SIZE}
-                      />
-                    }
-                  />
-                )
-              ) : profile?.image_url ? (
-                <Image
-                  className={`size-[32px] rounded`}
-                  src={profile?.image_url}
-                  height={32}
-                  width={32}
-                  alt="user image"
+              {isAssistant ? (
+                <WithTooltip
+                  display={<div>{modelData?.modelName ?? message.model}</div>}
+                  trigger={
+                    <ModelIcon
+                      provider={modelData?.provider ?? "mercan"}
+                      height={ICON_SIZE}
+                      width={ICON_SIZE}
+                    />
+                  }
                 />
               ) : (
-                <IconMoodSmile
-                  className="bg-primary text-secondary border-primary rounded border-DEFAULT p-1"
-                  size={ICON_SIZE}
-                />
+                <div
+                  className="flex shrink-0 items-center justify-center"
+                  style={{ width: ICON_SIZE, height: ICON_SIZE }}
+                >
+                  <div className="bg-muted-foreground size-2.5 rounded-full" />
+                </div>
               )}
 
               <div className="font-semibold">
-                {message.role === "assistant"
-                  ? message.assistant_id
-                    ? assistants.find(
-                        assistant => assistant.id === message.assistant_id
-                      )?.name
-                    : selectedAssistant
-                      ? selectedAssistant?.name
-                      : MODEL_DATA?.modelName
-                  : profile?.display_name ?? profile?.username}
+                {isAssistant
+                  ? modelData?.modelName ?? message.model
+                  : profile?.display_name || "Sen"}
               </div>
+
+              {isAssistant && metadata.demo && (
+                <div className="text-muted-foreground border-input rounded border px-1.5 text-xs">
+                  Demo yanıtı
+                </div>
+              )}
             </div>
           )}
-          {!firstTokenReceived &&
-          isGenerating &&
-          isLast &&
-          message.role === "assistant" ? (
-            <>
-              {(() => {
-                switch (toolInUse) {
-                  case "none":
-                    return (
-                      <IconCircleFilled className="animate-pulse" size={20} />
-                    )
-                  case "retrieval":
-                    return (
-                      <div className="flex animate-pulse items-center space-x-2">
-                        <IconFileText size={20} />
 
-                        <div>Searching files...</div>
-                      </div>
-                    )
-                  default:
-                    return (
-                      <div className="flex animate-pulse items-center space-x-2">
-                        <IconBolt size={20} />
-
-                        <div>Using {toolInUse}...</div>
-                      </div>
-                    )
-                }
-              })()}
-            </>
+          {!firstTokenReceived && isStreaming && !message.content ? (
+            renderPending()
           ) : isEditing ? (
             <TextareaAutosize
               textareaRef={editInputRef}
@@ -305,141 +250,68 @@ export const Message: FC<MessageProps> = ({
               maxRows={20}
             />
           ) : (
-            <MessageMarkdown content={message.content} />
+            <>
+              {(reasoning || isThinking) && (
+                <MessageReasoning
+                  reasoning={reasoning}
+                  isThinking={isThinking && showCursor}
+                  showCursor={isThinking && showCursor}
+                />
+              )}
+
+              {showCursor && !isThinking ? (
+                <MessageMarkdown content={withCursor(answer)} />
+              ) : (
+                answer && <MessageMarkdown content={answer} />
+              )}
+            </>
           )}
         </div>
 
-        {fileItems.length > 0 && (
-          <div className="border-primary mt-6 border-t pt-4 font-bold">
-            {!viewSources ? (
-              <div
-                className="flex cursor-pointer items-center text-lg hover:opacity-50"
-                onClick={() => setViewSources(true)}
-              >
-                {fileItems.length}
-                {fileItems.length > 1 ? " Sources " : " Source "}
-                from {Object.keys(fileSummary).length}{" "}
-                {Object.keys(fileSummary).length > 1 ? "Files" : "File"}{" "}
-                <IconCaretRightFilled className="ml-1" />
-              </div>
-            ) : (
-              <>
-                <div
-                  className="flex cursor-pointer items-center text-lg hover:opacity-50"
-                  onClick={() => setViewSources(false)}
-                >
-                  {fileItems.length}
-                  {fileItems.length > 1 ? " Sources " : " Source "}
-                  from {Object.keys(fileSummary).length}{" "}
-                  {Object.keys(fileSummary).length > 1 ? "Files" : "File"}{" "}
-                  <IconCaretDownFilled className="ml-1" />
-                </div>
+        {isAssistant &&
+          isDone &&
+          metadata.sources &&
+          metadata.sources.length > 0 && (
+            <MessageSources sources={metadata.sources} />
+          )}
 
-                <div className="mt-3 space-y-4">
-                  {Object.values(fileSummary).map((file, index) => (
-                    <div key={index}>
-                      <div className="flex items-center space-x-2">
-                        <div>
-                          <FileIcon type={file.type} />
-                        </div>
+        {isAssistant && metadata.searchError && isDone && (
+          <div className="text-muted-foreground mt-4 text-xs">
+            Web araması yapılamadı: {metadata.searchError}
+          </div>
+        )}
 
-                        <div className="truncate">{file.name}</div>
-                      </div>
+        {isAssistant && isDone && (usage || metadata.finishReason) && (
+          <div className="text-muted-foreground mt-4 flex flex-wrap gap-x-3 text-xs">
+            {usage?.completionTokens !== undefined && (
+              <span>{usage.completionTokens} token</span>
+            )}
 
-                      {fileItems
-                        .filter(fileItem => {
-                          const parentFile = files.find(
-                            parentFile => parentFile.id === fileItem.file_id
-                          )
-                          return parentFile?.id === file.id
-                        })
-                        .map((fileItem, index) => (
-                          <div
-                            key={index}
-                            className="ml-8 mt-1.5 flex cursor-pointer items-center space-x-2 hover:opacity-50"
-                            onClick={() => {
-                              setSelectedFileItem(fileItem)
-                              setShowFileItemPreview(true)
-                            }}
-                          >
-                            <div className="text-sm font-normal">
-                              <span className="mr-1 text-lg font-bold">-</span>{" "}
-                              {fileItem.content.substring(0, 200)}...
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  ))}
-                </div>
-              </>
+            {usage?.tokensPerSecond !== undefined &&
+              usage.tokensPerSecond > 0 && (
+                <span>
+                  {formatSettingValue(usage.tokensPerSecond, 1)} token/sn
+                </span>
+              )}
+
+            {metadata.finishReason === "length" && (
+              <span>Yanıt uzunluk sınırında kesildi (max_tokens)</span>
             )}
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          {message.image_paths.map((path, index) => {
-            const item = chatImages.find(image => image.path === path)
-
-            return (
-              <Image
-                key={index}
-                className="cursor-pointer rounded hover:opacity-50"
-                src={path.startsWith("data") ? path : item?.base64}
-                alt="message image"
-                width={300}
-                height={300}
-                onClick={() => {
-                  setSelectedImage({
-                    messageId: message.id,
-                    path,
-                    base64: path.startsWith("data") ? path : item?.base64 || "",
-                    url: path.startsWith("data") ? "" : item?.url || "",
-                    file: null
-                  })
-
-                  setShowImagePreview(true)
-                }}
-                loading="lazy"
-              />
-            )
-          })}
-        </div>
         {isEditing && (
           <div className="mt-4 flex justify-center space-x-2">
             <Button size="sm" onClick={handleSendEdit}>
-              Save & Send
+              Kaydet ve Gönder
             </Button>
 
             <Button size="sm" variant="outline" onClick={onCancelEdit}>
-              Cancel
+              Vazgeç
             </Button>
           </div>
         )}
       </div>
-
-      {showImagePreview && selectedImage && (
-        <FilePreview
-          type="image"
-          item={selectedImage}
-          isOpen={showImagePreview}
-          onOpenChange={(isOpen: boolean) => {
-            setShowImagePreview(isOpen)
-            setSelectedImage(null)
-          }}
-        />
-      )}
-
-      {showFileItemPreview && selectedFileItem && (
-        <FilePreview
-          type="file_item"
-          item={selectedFileItem}
-          isOpen={showFileItemPreview}
-          onOpenChange={(isOpen: boolean) => {
-            setShowFileItemPreview(isOpen)
-            setSelectedFileItem(null)
-          }}
-        />
-      )}
     </div>
   )
 }

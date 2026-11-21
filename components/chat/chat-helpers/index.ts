@@ -1,27 +1,26 @@
 // Only used in use-chat-handler.tsx to keep it clean
 
-import { createChatFiles } from "@/db/chat-files"
+import { ToolInUse } from "@/context/context"
 import { createChat } from "@/db/chats"
-import { createMessageFileItems } from "@/db/message-file-items"
 import { createMessages, updateMessage } from "@/db/messages"
-import { uploadMessageImage } from "@/db/storage/message-images"
-import {
-  buildFinalMessages,
-  adaptMessagesForGoogleGemini
-} from "@/lib/build-prompt"
+import { buildFinalMessages } from "@/lib/build-prompt"
 import { consumeReadableStream } from "@/lib/consume-stream"
-import { Tables, TablesInsert } from "@/supabase/types"
+import { rowFromChatSettings } from "@/lib/mercan/settings"
+import { Json, Tables, TablesInsert } from "@/types/database"
 import {
-  ChatFile,
+  ChatAPIPayload,
   ChatMessage,
   ChatPayload,
   ChatSettings,
+  ChatStreamEvent,
   LLM,
-  MessageImage
+  MessageMetadata
 } from "@/types"
 import React from "react"
 import { toast } from "sonner"
 import { v4 as uuidv4 } from "uuid"
+
+type SetState<T> = React.Dispatch<React.SetStateAction<T>>
 
 export const validateChatSettings = (
   chatSettings: ChatSettings | null,
@@ -31,103 +30,84 @@ export const validateChatSettings = (
   messageContent: string
 ) => {
   if (!chatSettings) {
-    throw new Error("Chat settings not found")
+    throw new Error("Sohbet ayarları bulunamadı.")
   }
 
   if (!modelData) {
-    throw new Error("Model not found")
+    throw new Error("Model bulunamadı.")
   }
 
   if (!profile) {
-    throw new Error("Profile not found")
+    throw new Error("Profil bulunamadı.")
   }
 
   if (!selectedWorkspace) {
-    throw new Error("Workspace not found")
+    throw new Error("Çalışma alanı bulunamadı.")
   }
 
-  if (!messageContent) {
-    throw new Error("Message content not found")
+  if (!messageContent.trim()) {
+    throw new Error("Mesaj boş olamaz.")
   }
-}
-
-export const handleRetrieval = async (
-  userInput: string,
-  newMessageFiles: ChatFile[],
-  chatFiles: ChatFile[],
-  embeddingsProvider: "openai" | "local",
-  sourceCount: number
-) => {
-  const response = await fetch("/api/retrieval/retrieve", {
-    method: "POST",
-    body: JSON.stringify({
-      userInput,
-      fileIds: [...newMessageFiles, ...chatFiles].map(file => file.id),
-      embeddingsProvider,
-      sourceCount
-    })
-  })
-
-  if (!response.ok) {
-    console.error("Error retrieving:", response)
-  }
-
-  const { results } = (await response.json()) as {
-    results: Tables<"file_items">[]
-  }
-
-  return results
 }
 
 export const createTempMessages = (
   messageContent: string,
   chatMessages: ChatMessage[],
   chatSettings: ChatSettings,
-  b64Images: string[],
   isRegeneration: boolean,
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  selectedAssistant: Tables<"assistants"> | null
+  setChatMessages: SetState<ChatMessage[]>,
+  initialMetadata: MessageMetadata
 ) => {
-  let tempUserChatMessage: ChatMessage = {
+  const tempUserChatMessage: ChatMessage = {
     message: {
       chat_id: "",
       assistant_id: null,
       content: messageContent,
       created_at: "",
       id: uuidv4(),
-      image_paths: b64Images,
+      image_paths: [],
+      metadata: null,
       model: chatSettings.model,
       role: "user",
       sequence_number: chatMessages.length,
       updated_at: "",
       user_id: ""
-    },
-    fileItems: []
+    }
   }
 
-  let tempAssistantChatMessage: ChatMessage = {
+  const tempAssistantChatMessage: ChatMessage = {
     message: {
       chat_id: "",
-      assistant_id: selectedAssistant?.id || null,
+      assistant_id: null,
       content: "",
       created_at: "",
       id: uuidv4(),
       image_paths: [],
+      metadata: initialMetadata as unknown as Json,
       model: chatSettings.model,
       role: "assistant",
       sequence_number: chatMessages.length + 1,
       updated_at: "",
       user_id: ""
-    },
-    fileItems: []
+    }
   }
 
-  let newMessages = []
+  let newMessages: ChatMessage[] = []
 
   if (isRegeneration) {
     const lastMessageIndex = chatMessages.length - 1
-    chatMessages[lastMessageIndex].message.content = ""
-    newMessages = [...chatMessages]
+
+    newMessages = chatMessages.map((chatMessage, index) =>
+      index === lastMessageIndex
+        ? {
+            message: {
+              ...chatMessage.message,
+              content: "",
+              metadata: initialMetadata as unknown as Json
+            }
+          }
+        : chatMessage
+    )
   } else {
     newMessages = [
       ...chatMessages,
@@ -144,135 +124,67 @@ export const createTempMessages = (
   }
 }
 
-export const handleLocalChat = async (
-  payload: ChatPayload,
-  profile: Tables<"profiles">,
-  chatSettings: ChatSettings,
-  tempAssistantMessage: ChatMessage,
-  isRegeneration: boolean,
-  newAbortController: AbortController,
-  setIsGenerating: React.Dispatch<React.SetStateAction<boolean>>,
-  setFirstTokenReceived: React.Dispatch<React.SetStateAction<boolean>>,
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  setToolInUse: React.Dispatch<React.SetStateAction<string>>
-) => {
-  const formattedMessages = await buildFinalMessages(payload, profile, [])
-
-  // Ollama API: https://github.com/jmorganca/ollama/blob/main/docs/api.md
-  const response = await fetchChatResponse(
-    process.env.NEXT_PUBLIC_OLLAMA_URL + "/api/chat",
-    {
-      model: chatSettings.model,
-      messages: formattedMessages,
-      options: {
-        temperature: payload.chatSettings.temperature
-      }
-    },
-    false,
-    newAbortController,
-    setIsGenerating,
-    setChatMessages
-  )
-
-  return await processResponse(
-    response,
-    isRegeneration
-      ? payload.chatMessages[payload.chatMessages.length - 1]
-      : tempAssistantMessage,
-    false,
-    newAbortController,
-    setFirstTokenReceived,
-    setChatMessages,
-    setToolInUse
-  )
-}
-
+// `payload.chatMessages` son kullanıcı mesajıyla biter; yanıt `targetMessage`a yazılır
+// (yeni mesajda geçici asistan mesajı, yeniden oluşturmada son asistan mesajı).
 export const handleHostedChat = async (
   payload: ChatPayload,
   profile: Tables<"profiles">,
-  modelData: LLM,
-  tempAssistantChatMessage: ChatMessage,
-  isRegeneration: boolean,
+  targetMessage: ChatMessage,
   newAbortController: AbortController,
-  newMessageImages: MessageImage[],
-  chatImages: MessageImage[],
-  setIsGenerating: React.Dispatch<React.SetStateAction<boolean>>,
-  setFirstTokenReceived: React.Dispatch<React.SetStateAction<boolean>>,
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  setToolInUse: React.Dispatch<React.SetStateAction<string>>
+  options: { reasoning: boolean; webSearch: boolean },
+  setFirstTokenReceived: SetState<boolean>,
+  setChatMessages: SetState<ChatMessage[]>,
+  setToolInUse: SetState<ToolInUse>
 ) => {
-  const provider =
-    modelData.provider === "openai" && profile.use_azure_openai
-      ? "azure"
-      : modelData.provider
+  const formattedMessages = await buildFinalMessages(payload, profile)
 
-  let draftMessages = await buildFinalMessages(payload, profile, chatImages)
-
-  let formattedMessages : any[] = []
-  if (provider === "google") {
-    formattedMessages = await adaptMessagesForGoogleGemini(payload, draftMessages)
-  } else {
-    formattedMessages = draftMessages
-  }
-
-  const apiEndpoint =
-    provider === "custom" ? "/api/chat/custom" : `/api/chat/${provider}`
-
-  const requestBody = {
+  const requestBody: ChatAPIPayload = {
     chatSettings: payload.chatSettings,
     messages: formattedMessages,
-    customModelId: provider === "custom" ? modelData.hostedId : ""
+    reasoning: options.reasoning,
+    webSearch: options.webSearch
   }
 
   const response = await fetchChatResponse(
-    apiEndpoint,
+    "/api/chat/mercan",
     requestBody,
-    true,
-    newAbortController,
-    setIsGenerating,
-    setChatMessages
+    newAbortController
   )
 
   return await processResponse(
     response,
-    isRegeneration
-      ? payload.chatMessages[payload.chatMessages.length - 1]
-      : tempAssistantChatMessage,
-    true,
+    targetMessage,
     newAbortController,
     setFirstTokenReceived,
     setChatMessages,
-    setToolInUse
+    setToolInUse,
+    { reasoning: options.reasoning, webSearch: options.webSearch }
   )
 }
 
 export const fetchChatResponse = async (
   url: string,
   body: object,
-  isHosted: boolean,
-  controller: AbortController,
-  setIsGenerating: React.Dispatch<React.SetStateAction<boolean>>,
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
+  controller: AbortController
 ) => {
   const response = await fetch(url, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: controller.signal
   })
 
   if (!response.ok) {
-    if (response.status === 404 && !isHosted) {
-      toast.error(
-        "Model not found. Make sure you have it downloaded via Ollama."
-      )
+    let message = `İstek başarısız oldu (HTTP ${response.status}).`
+
+    try {
+      const errorData = await response.json()
+      if (errorData?.message) message = errorData.message
+    } catch {
+      // Gövde JSON değilse varsayılan mesaj kullanılır.
     }
 
-    const errorData = await response.json()
-
-    toast.error(errorData.message)
-
-    setIsGenerating(false)
-    setChatMessages(prevMessages => prevMessages.slice(0, -2))
+    throw new Error(message)
   }
 
   return response
@@ -281,66 +193,102 @@ export const fetchChatResponse = async (
 export const processResponse = async (
   response: Response,
   lastChatMessage: ChatMessage,
-  isHosted: boolean,
   controller: AbortController,
-  setFirstTokenReceived: React.Dispatch<React.SetStateAction<boolean>>,
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  setToolInUse: React.Dispatch<React.SetStateAction<string>>
+  setFirstTokenReceived: SetState<boolean>,
+  setChatMessages: SetState<ChatMessage[]>,
+  setToolInUse: SetState<ToolInUse>,
+  initialMetadata: MessageMetadata
 ) => {
-  let fullText = ""
-  let contentToAdd = ""
+  if (!response.body) {
+    throw new Error("Sunucudan boş yanıt geldi.")
+  }
 
-  if (response.body) {
-    await consumeReadableStream(
-      response.body,
-      chunk => {
+  let fullText = ""
+  let buffer = ""
+  let streamError = ""
+  const metadata: MessageMetadata = { ...initialMetadata }
+
+  const handleEvent = (event: ChatStreamEvent) => {
+    switch (event.type) {
+      case "text":
+        fullText += event.value
         setFirstTokenReceived(true)
         setToolInUse("none")
-
-        try {
-          contentToAdd = isHosted
-            ? chunk
-            : // Ollama's streaming endpoint returns new-line separated JSON
-              // objects. A chunk may have more than one of these objects, so we
-              // need to split the chunk by new-lines and handle each one
-              // separately.
-              chunk
-                .trimEnd()
-                .split("\n")
-                .reduce(
-                  (acc, line) => acc + JSON.parse(line).message.content,
-                  ""
-                )
-          fullText += contentToAdd
-        } catch (error) {
-          console.error("Error parsing JSON:", error)
-        }
-
-        setChatMessages(prev =>
-          prev.map(chatMessage => {
-            if (chatMessage.message.id === lastChatMessage.message.id) {
-              const updatedChatMessage: ChatMessage = {
-                message: {
-                  ...chatMessage.message,
-                  content: fullText
-                },
-                fileItems: chatMessage.fileItems
-              }
-
-              return updatedChatMessage
-            }
-
-            return chatMessage
-          })
-        )
-      },
-      controller.signal
-    )
-
-    return fullText
-  } else {
-    throw new Error("Response body is null")
+        break
+      case "sources":
+        metadata.sources = event.value
+        setToolInUse("none")
+        break
+      case "search_error":
+        metadata.searchError = event.value
+        setToolInUse("none")
+        break
+      case "usage":
+        metadata.usage = event.value
+        break
+      case "finish":
+        metadata.finishReason = event.value
+        break
+      case "demo":
+        metadata.demo = event.value
+        break
+      case "error":
+        streamError = event.value
+        break
+    }
   }
+
+  const handleLines = (lines: string[]) => {
+    for (const line of lines) {
+      if (!line.trim()) continue
+
+      try {
+        handleEvent(JSON.parse(line) as ChatStreamEvent)
+      } catch (error) {
+        console.error("Akış satırı çözümlenemedi:", line, error)
+      }
+    }
+  }
+
+  const applyUpdate = () => {
+    setChatMessages(prev =>
+      prev.map(chatMessage =>
+        chatMessage.message.id === lastChatMessage.message.id
+          ? {
+              message: {
+                ...chatMessage.message,
+                content: fullText,
+                metadata: { ...metadata } as unknown as Json
+              }
+            }
+          : chatMessage
+      )
+    )
+  }
+
+  await consumeReadableStream(
+    response.body,
+    chunk => {
+      buffer += chunk
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      handleLines(lines)
+      applyUpdate()
+    },
+    controller.signal
+  )
+
+  if (buffer.trim()) {
+    handleLines([buffer])
+    applyUpdate()
+  }
+
+  if (streamError) {
+    if (!fullText.trim()) throw new Error(streamError)
+    toast.error(streamError)
+  }
+
+  return { text: fullText, metadata }
 }
 
 export const handleCreateChat = async (
@@ -348,38 +296,18 @@ export const handleCreateChat = async (
   profile: Tables<"profiles">,
   selectedWorkspace: Tables<"workspaces">,
   messageContent: string,
-  selectedAssistant: Tables<"assistants">,
-  newMessageFiles: ChatFile[],
-  setSelectedChat: React.Dispatch<React.SetStateAction<Tables<"chats"> | null>>,
-  setChats: React.Dispatch<React.SetStateAction<Tables<"chats">[]>>,
-  setChatFiles: React.Dispatch<React.SetStateAction<ChatFile[]>>
+  setSelectedChat: SetState<Tables<"chats"> | null>,
+  setChats: SetState<Tables<"chats">[]>
 ) => {
   const createdChat = await createChat({
     user_id: profile.user_id,
     workspace_id: selectedWorkspace.id,
-    assistant_id: selectedAssistant?.id || null,
-    context_length: chatSettings.contextLength,
-    include_profile_context: chatSettings.includeProfileContext,
-    include_workspace_instructions: chatSettings.includeWorkspaceInstructions,
-    model: chatSettings.model,
-    name: messageContent.substring(0, 100),
-    prompt: chatSettings.prompt,
-    temperature: chatSettings.temperature,
-    embeddings_provider: chatSettings.embeddingsProvider
+    name: messageContent.replace(/\s+/g, " ").trim().substring(0, 100),
+    ...rowFromChatSettings(chatSettings)
   })
 
   setSelectedChat(createdChat)
   setChats(chats => [createdChat, ...chats])
-
-  await createChatFiles(
-    newMessageFiles.map(file => ({
-      user_id: profile.user_id,
-      chat_id: createdChat.id,
-      file_id: file.id
-    }))
-  )
-
-  setChatFiles(prev => [...prev, ...newMessageFiles])
 
   return createdChat
 }
@@ -391,16 +319,27 @@ export const handleCreateMessages = async (
   modelData: LLM,
   messageContent: string,
   generatedText: string,
-  newMessageImages: MessageImage[],
+  metadata: MessageMetadata,
   isRegeneration: boolean,
-  retrievedFileItems: Tables<"file_items">[],
-  setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  setChatFileItems: React.Dispatch<
-    React.SetStateAction<Tables<"file_items">[]>
-  >,
-  setChatImages: React.Dispatch<React.SetStateAction<MessageImage[]>>,
-  selectedAssistant: Tables<"assistants"> | null
+  setChatMessages: SetState<ChatMessage[]>
 ) => {
+  if (isRegeneration) {
+    const lastStartingMessage = chatMessages[chatMessages.length - 1].message
+
+    const updatedMessage = await updateMessage(lastStartingMessage.id, {
+      content: generatedText,
+      model: modelData.modelId,
+      metadata: metadata as unknown as Json
+    })
+
+    setChatMessages([
+      ...chatMessages.slice(0, -1),
+      { message: updatedMessage }
+    ])
+
+    return
+  }
+
   const finalUserMessage: TablesInsert<"messages"> = {
     chat_id: currentChat.id,
     assistant_id: null,
@@ -409,103 +348,30 @@ export const handleCreateMessages = async (
     model: modelData.modelId,
     role: "user",
     sequence_number: chatMessages.length,
-    image_paths: []
+    image_paths: [],
+    metadata: null
   }
 
   const finalAssistantMessage: TablesInsert<"messages"> = {
     chat_id: currentChat.id,
-    assistant_id: selectedAssistant?.id || null,
+    assistant_id: null,
     user_id: profile.user_id,
     content: generatedText,
     model: modelData.modelId,
     role: "assistant",
     sequence_number: chatMessages.length + 1,
-    image_paths: []
+    image_paths: [],
+    metadata: metadata as unknown as Json
   }
 
-  let finalChatMessages: ChatMessage[] = []
+  const createdMessages = await createMessages([
+    finalUserMessage,
+    finalAssistantMessage
+  ])
 
-  if (isRegeneration) {
-    const lastStartingMessage = chatMessages[chatMessages.length - 1].message
-
-    const updatedMessage = await updateMessage(lastStartingMessage.id, {
-      ...lastStartingMessage,
-      content: generatedText
-    })
-
-    chatMessages[chatMessages.length - 1].message = updatedMessage
-
-    finalChatMessages = [...chatMessages]
-
-    setChatMessages(finalChatMessages)
-  } else {
-    const createdMessages = await createMessages([
-      finalUserMessage,
-      finalAssistantMessage
-    ])
-
-    // Upload each image (stored in newMessageImages) for the user message to message_images bucket
-    const uploadPromises = newMessageImages
-      .filter(obj => obj.file !== null)
-      .map(obj => {
-        let filePath = `${profile.user_id}/${currentChat.id}/${
-          createdMessages[0].id
-        }/${uuidv4()}`
-
-        return uploadMessageImage(filePath, obj.file as File).catch(error => {
-          console.error(`Failed to upload image at ${filePath}:`, error)
-          return null
-        })
-      })
-
-    const paths = (await Promise.all(uploadPromises)).filter(
-      Boolean
-    ) as string[]
-
-    setChatImages(prevImages => [
-      ...prevImages,
-      ...newMessageImages.map((obj, index) => ({
-        ...obj,
-        messageId: createdMessages[0].id,
-        path: paths[index]
-      }))
-    ])
-
-    const updatedMessage = await updateMessage(createdMessages[0].id, {
-      ...createdMessages[0],
-      image_paths: paths
-    })
-
-    const createdMessageFileItems = await createMessageFileItems(
-      retrievedFileItems.map(fileItem => {
-        return {
-          user_id: profile.user_id,
-          message_id: createdMessages[1].id,
-          file_item_id: fileItem.id
-        }
-      })
-    )
-
-    finalChatMessages = [
-      ...chatMessages,
-      {
-        message: updatedMessage,
-        fileItems: []
-      },
-      {
-        message: createdMessages[1],
-        fileItems: retrievedFileItems.map(fileItem => fileItem.id)
-      }
-    ]
-
-    setChatFileItems(prevFileItems => {
-      const newFileItems = retrievedFileItems.filter(
-        fileItem => !prevFileItems.some(prevItem => prevItem.id === fileItem.id)
-      )
-
-      return [...prevFileItems, ...newFileItems]
-    })
-
-    setChatMessages(finalChatMessages)
-  }
+  setChatMessages([
+    ...chatMessages,
+    { message: createdMessages[0] },
+    { message: createdMessages[1] }
+  ])
 }

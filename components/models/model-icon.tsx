@@ -1,105 +1,31 @@
 import { cn } from "@/lib/utils"
-import mistral from "@/public/providers/mistral.png"
-import groq from "@/public/providers/groq.png"
-import perplexity from "@/public/providers/perplexity.png"
 import { ModelProvider } from "@/types"
 import { IconSparkles } from "@tabler/icons-react"
-import { useTheme } from "next-themes"
-import Image from "next/image"
 import { FC, HTMLAttributes } from "react"
-import { AnthropicSVG } from "../icons/anthropic-svg"
-import { GoogleSVG } from "../icons/google-svg"
-import { OpenAISVG } from "../icons/openai-svg"
+import { MercanSVG } from "../icons/mercan-svg"
 
 interface ModelIconProps extends HTMLAttributes<HTMLDivElement> {
-  provider: ModelProvider
+  provider: ModelProvider | undefined
   height: number
   width: number
 }
 
+// Mercan modelleri için şeffaf (arka plansız) Mercan işareti.
 export const ModelIcon: FC<ModelIconProps> = ({
   provider,
   height,
   width,
-  ...props
+  className
 }) => {
-  const { theme } = useTheme()
-
-  switch (provider as ModelProvider) {
-    case "openai":
+  switch (provider) {
+    case "mercan":
       return (
-        <OpenAISVG
-          className={cn(
-            "rounded-sm bg-white p-1 text-black",
-            props.className,
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          width={width}
-          height={height}
-        />
-      )
-    case "mistral":
-      return (
-        <Image
-          className={cn(
-            "rounded-sm p-1",
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          src={mistral.src}
-          alt="Mistral"
-          width={width}
-          height={height}
-        />
-      )
-    case "groq":
-      return (
-        <Image
-          className={cn(
-            "rounded-sm p-0",
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          src={groq.src}
-          alt="Groq"
-          width={width}
-          height={height}
-        />
-      )
-    case "anthropic":
-      return (
-        <AnthropicSVG
-          className={cn(
-            "rounded-sm bg-white p-1 text-black",
-            props.className,
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          width={width}
-          height={height}
-        />
-      )
-    case "google":
-      return (
-        <GoogleSVG
-          className={cn(
-            "rounded-sm bg-white p-1 text-black",
-            props.className,
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          width={width}
-          height={height}
-        />
-      )
-    case "perplexity":
-      return (
-        <Image
-          className={cn(
-            "rounded-sm p-1",
-            theme === "dark" ? "bg-white" : "border-DEFAULT border-black"
-          )}
-          src={perplexity.src}
-          alt="Mistral"
-          width={width}
-          height={height}
-        />
+        <div
+          className={cn("flex shrink-0 items-center justify-center", className)}
+          style={{ width, height }}
+        >
+          <MercanSVG size={Math.round(height * 0.9)} />
+        </div>
       )
     default:
       return <IconSparkles size={width} />

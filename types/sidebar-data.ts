@@ -1,21 +1,5 @@
-import { Tables } from "@/supabase/types"
+import { Tables } from "@/types/database"
 
-export type DataListType =
-  | Tables<"collections">[]
-  | Tables<"chats">[]
-  | Tables<"presets">[]
-  | Tables<"prompts">[]
-  | Tables<"files">[]
-  | Tables<"assistants">[]
-  | Tables<"tools">[]
-  | Tables<"models">[]
+export type DataListType = Tables<"chats">[]
 
-export type DataItemType =
-  | Tables<"collections">
-  | Tables<"chats">
-  | Tables<"presets">
-  | Tables<"prompts">
-  | Tables<"files">
-  | Tables<"assistants">
-  | Tables<"tools">
-  | Tables<"models">
+export type DataItemType = Tables<"chats">

@@ -12,7 +12,7 @@ import {
 import { ChatbotUIContext } from "@/context/context"
 import { deleteChat } from "@/db/chats"
 import useHotkey from "@/lib/hooks/use-hotkey"
-import { Tables } from "@/supabase/types"
+import { Tables } from "@/types/database"
 import { IconTrash } from "@tabler/icons-react"
 import { FC, useContext, useRef, useState } from "react"
 
@@ -54,16 +54,16 @@ export const DeleteChat: FC<DeleteChatProps> = ({ chat }) => {
 
       <DialogContent onKeyDown={handleKeyDown}>
         <DialogHeader>
-          <DialogTitle>Delete {chat.name}</DialogTitle>
+          <DialogTitle>Sohbeti sil: {chat.name}</DialogTitle>
 
           <DialogDescription>
-            Are you sure you want to delete this chat?
+            Bu sohbet ve tüm mesajları kalıcı olarak silinsin mi?
           </DialogDescription>
         </DialogHeader>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => setShowChatDialog(false)}>
-            Cancel
+            Vazgeç
           </Button>
 
           <Button
@@ -71,7 +71,7 @@ export const DeleteChat: FC<DeleteChatProps> = ({ chat }) => {
             variant="destructive"
             onClick={handleDeleteChat}
           >
-            Delete
+            Sil
           </Button>
         </DialogFooter>
       </DialogContent>
